@@ -1,0 +1,142 @@
+{
+  "project_identity": {
+    "app_name": "Radar Sanitário",
+    "tagline": "Gestão e Monitoramento de Licenças Sanitárias e Resíduos de Serviços de Saúde (RSS)",
+    "description": "SaaS para clínicas, hospitais e laboratórios para controle de licenças de Vigilância Sanitária, PGRSS, MTR e contratos de coleta com alertas em tempo real.",
+    "emotional_archetype": "Sanitary Emerald & Tactical Slate - Credibilidade Sanitária e Ambiental",
+    "theme_preference": "Emerald green primary + slate/warm neutral background. Supports Light/Dark mode toggle."
+  },
+  "typography": {
+    "heading_font": "Outfit, Cabinet Grotesk, sans-serif",
+    "body_font": "Plus Jakarta Sans, Inter, sans-serif",
+    "mono_font": "JetBrains Mono, monospace",
+    "hierarchy_rules": {
+      "h1_hero": "text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-none",
+      "h2_section": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900 dark:text-slate-100",
+      "h3_subsection": "text-xl sm:text-2xl font-semibold text-slate-800 dark:text-slate-200",
+      "card_title": "text-lg sm:text-xl font-medium text-slate-900 dark:text-slate-100",
+      "body": "text-base leading-relaxed text-slate-600 dark:text-slate-300",
+      "small_label": "text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400"
+    }
+  },
+  "colors": {
+    "primary_emerald": "#059669",
+    "emerald_dark": "#064e3b",
+    "emerald_hover": "#047857",
+    "emerald_light": "#d1fae5",
+    "accent_mint": "#10b981",
+    "slate_bg_light": "#f8fafc",
+    "slate_surface_light": "#ffffff",
+    "slate_border_light": "#e2e8f0",
+    "dark_bg": "#090d16",
+    "dark_surface": "#111827",
+    "dark_border": "#1f2937",
+    "status_expired": {
+      "bg": "bg-rose-50 dark:bg-rose-950/50",
+      "text": "text-rose-700 dark:text-rose-400",
+      "border": "border-rose-200 dark:border-rose-800",
+      "badge": "bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-200"
+    },
+    "status_critical_30d": {
+      "bg": "bg-amber-50 dark:bg-amber-950/50",
+      "text": "text-amber-700 dark:text-amber-400",
+      "border": "border-amber-200 dark:border-amber-800",
+      "badge": "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200"
+    },
+    "status_warning_90d": {
+      "bg": "bg-sky-50 dark:bg-sky-950/50",
+      "text": "text-sky-700 dark:text-sky-400",
+      "border": "border-sky-200 dark:border-sky-800",
+      "badge": "bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200"
+    },
+    "status_valid": {
+      "bg": "bg-emerald-50 dark:bg-emerald-950/50",
+      "text": "text-emerald-700 dark:text-emerald-400",
+      "border": "border-emerald-200 dark:border-emerald-800",
+      "badge": "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200"
+    }
+  },
+  "layout_and_grids": {
+    "spacing_philosophy": "Generous padding (p-6, p-8, p-12) with explicit container borders and soft ambient dropshadows.",
+    "bento_grid_dashboard": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6",
+    "chart_section_grid": "grid grid-cols-1 lg:grid-cols-3 gap-6",
+    "table_container": "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm",
+    "mobile_first": true
+  },
+  "key_views_and_features": [
+    {
+      "name": "Landing Page Comercial",
+      "path": "/",
+      "purpose": "Apresentação e venda do SaaS para estabelecimentos de saúde no Brasil",
+      "key_elements": [
+        "Hero section com CTA direto para 'Iniciar Teste Grátis' e simulação visual de radar sanitário",
+        "Calculadora interativa de Risco Sanitário (Simule o custo de multas por Alvará Vencido)",
+        "Grid de Recursos (RSS, PGRSS, Notificações via WhatsApp/SMS, Agenda de Coleta)",
+        "Depoimentos de Diretores Médicos e Responsáveis Técnicos",
+        "Tabela comparativa de Planos (Essencial, Pro Clínica, Hospitalar)"
+      ]
+    },
+    {
+      "name": "Painel Principal (Dashboard 12 Meses)",
+      "path": "/dashboard",
+      "purpose": "Acompanhamento geral em tempo real da situação sanitária e documental",
+      "key_elements": [
+        "Cards KPI em grade Bento: Documentos Vencidos, A vencer ≤30 dias, A vencer 31-90 dias, Documentos 100% Válidos",
+        "Gráfico de Tendências dos Últimos 12 Meses (Conformidade x Licenças Vencidas) usando Recharts",
+        "Tabela de Alertas Sanitários de Alta Prioridade com ação de renovação rápida e envio de lembrete",
+        "Widget 'O que sua clínica precisa fazer esta semana' com checklist dinâmico",
+        "Atalho para disparar Notificação em Tempo Real (Toasts e Alertas)"
+      ]
+    },
+    {
+      "name": "Gestão de Estabelecimentos",
+      "path": "/estabelecimentos",
+      "purpose": "Cadastro e controle de Hospitais, Clínicas Odontológicas, Vet, Laboratórios e Centros Estéticos",
+      "key_elements": [
+        "Filtro por categoria e busca por CNPJ/Razão Social",
+        "Modal de Cadastro/Edição de Estabelecimento com suporte a múltiplos contatos e Responsável Técnico (RT)",
+        "Indicador de Nível de Risco Sanitário (Grau I, II ou III)"
+      ]
+    },
+    {
+      "name": "Documentos e Licenças (RSS & Vigilância)",
+      "path": "/documentos",
+      "purpose": "Controle minucioso de Alvará Sanitário, Licença Ambiental, PGRSS, MTR e Contratos",
+      "key_elements": [
+        "Badges de status com contagem de dias restantes em tempo real",
+        "Filtros de status (Todos, Vencidos, Críticos, Válidos) e por tipo de documento",
+        "Ação de 'Renovar Documento' com atualização automática de vencimento",
+        "Visualizador e emissão de alertas diretos para a empresa responsável"
+      ]
+    },
+    {
+      "name": "Agendamento de Coletas & Visitas Técnicas",
+      "path": "/agendamento",
+      "purpose": "Calendário de rotas de coleta de resíduos e inspeções preventivas",
+      "key_elements": [
+        "Visão de calendário mensal/semanal de coletas RSS (Infectante, Químico, Perfurocortante)",
+        "Agendamento de visita do Engenheiro Ambiental / Consultor Sanitário",
+        "Status de confirmação de entrega do Manifesto MTR"
+      ]
+    }
+  ],
+  "components_and_ui_patterns": {
+    "toast_notifications": "Use Sonner ('sonner') para alertas instantâneos de documentos prestes a vencer",
+    "modals_and_drawers": "Use Shadcn Dialog e Sheet para adição de empresas, upload de licenças e detalhes de inspeção",
+    "data_tables": "Use Shadcn Table com cabeçalho fixo, suporte a busca e badges coloridos para legibilidade imediata",
+    "chart_library": "Recharts (ResponsiveContainer, AreaChart/BarChart com gradiente verde esmeralda)",
+    "date_picker": "Shadcn Calendar / Popover para definição de datas de expiração e agendamentos"
+  },
+  "image_urls": {
+    "laboratory_tech": "https://images.unsplash.com/photo-1602052577122-f73b9710adba?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzd8MHwxfHNlYXJjaHw0fHxoZWFsdGhjYXJlJTIwY2xpbmljJTIwd2FzdGUlMjBtYW5hZ2VtZW50JTIwZW52aXJvbm1lbnRhbCUyMGNvbXBsaWFuY2UlMjBsYWJvcmF0b3J5JTIwZG9jdG9yfGVufDB8fHx8MTc4ODk5OTA3Nnww&ixlib=rb-4.1.0&q=85",
+    "hospital_operating_room": "https://images.unsplash.com/photo-1551076805-e1869033e561?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzd8MHwxfHNlYXJjaHxfHxoZWFsdGhjYXJlJTIwY2xpbmljJTIwd2FzdGUlMjBtYW5hZ2VtZW50JTIwZW52aXJvbm1lbnRhbCUyMGNvbXBsaWFuY2UlMjBsYWJvcmF0b3J5JTIwZG9jdG9yfGVufDB8fHx8MTc4ODk5OTA3Nnww&ixlib=rb-4.1.0&q=85",
+    "medical_doctor": "https://images.unsplash.com/photo-1758691463582-11aea602cd4a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzV8MHwxfHNlYXJjaHw0fHxkb2N0b3IlMjBoZWFsdGhjYXJlJTIwY2xpbmljJTIwbWVkaWNhbCUyMHByb2Zlc3Npb25hbCUyMGhvc3BpdGFsfGVufDB8fHx8MTc4ODk5OTA4M3ww&ixlib=rb-4.1.0&q=85"
+  },
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": {
+    "test_attributes": "EVERY interactive element (buttons, tabs, inputs, dialog triggers, table rows, links, switches) MUST contain a unique data-testid attribute in kebab-case format (e.g. data-testid='add-establishment-button', data-testid='filter-status-expired').",
+    "no_transparent_headers": "Headers and sticky navbars MUST use solid or backdrop-blur surfaces (e.g., bg-white/90 dark:bg-slate-900/90 backdrop-blur-md) with border-b border-slate-200 dark:border-slate-800.",
+    "language": "All user interface text, notifications, buttons, and mock data MUST be in Brazilian Portuguese (Pt-BR).",
+    "micro_interactions": "Ensure hover effects on buttons (hover:bg-emerald-700 hover:shadow-md transition-all duration-200), card elevation on hover, and active state highlights.",
+    "data_density": "Use clean tables and badges for license status to ensure administrators and healthcare providers can immediately spot urgent actions."
+  }
+}
