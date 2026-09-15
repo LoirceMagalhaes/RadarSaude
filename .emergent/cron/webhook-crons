@@ -6,4 +6,5 @@ WEBHOOK_ENV_FILE=/app/backend/.env
 CRON_API_URL=https://ea.int.apis.emergentagent.com
 
 0 11 * * * root CRON_NAME=rs-wa-sweep-08 METHOD=POST ENDPOINT_URL_B64=aHR0cHM6Ly80ZTE0MjJhNy1lOWYyLTQxZTUtYTdmNy0wMjBmNDRmYzRiZjcucHJldmlldy5lbWVyZ2VudGFnZW50LmNvbS9hcGkvY3Jvbi93aGF0c2FwcC1zd2VlcA== /bin/sh /app/.emergent/cron/dispatch_webhook.sh >> /var/log/webhook-cron.log 2>&1
+0 12 * * 1 root CRON_NAME=rs-weekly-rank METHOD=POST ENDPOINT_URL_B64=aHR0cHM6Ly80ZTE0MjJhNy1lOWYyLTQxZTUtYTdmNy0wMjBmNDRmYzRiZjcucHJldmlldy5lbWVyZ2VudGFnZW50LmNvbS9hcGkvY3Jvbi93ZWVrbHktcmFua2luZw== /bin/sh /app/.emergent/cron/dispatch_webhook.sh >> /var/log/webhook-cron.log 2>&1
 * * * * * root JOB_ID=baacb204-3656-45ca-98c5-6fc18533d582 CRON_API_URL=https://ea.int.apis.emergentagent.com /bin/sh /app/.emergent/cron/watch_crons.sh >> /var/log/webhook-cron.log 2>&1

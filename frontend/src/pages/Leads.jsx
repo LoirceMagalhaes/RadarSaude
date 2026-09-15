@@ -1,7 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Users, Phone, RefreshCw, Trash2, MessageCircle, CheckCircle2, X, TrendingUp } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Users, Phone, RefreshCw, Trash2, MessageCircle, CheckCircle2, X, TrendingUp, Target, Send } from "lucide-react";
 import { toast } from "sonner";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from "recharts";
 
@@ -25,14 +27,45 @@ export default function Leads() {
   const [stats, setStats] = useState(null);
   const [filter, setFilter] = useState("todos");
   const [origemFilter, setOrigemFilter] = useState("todas");
+  const [goal, setGoal] = useState(5);
+  const [goalDraft, setGoalDraft] = useState("5");
+  const [savingGoal, setSavingGoal] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const load = async () => {
     try {
-      const [l, s] = await Promise.all([api.get("/leads"), api.get("/leads/stats")]);
+      const [l, s, g] = await Promise.all([
+        api.get("/leads"),
+        api.get("/leads/stats"),
+        api.get("/settings/weekly-goal"),
+      ]);
       setItems(l.data); setStats(s.data);
+      setGoal(g.data.value); setGoalDraft(String(g.data.value));
     } catch { toast.error("Erro ao carregar leads"); }
   };
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
+
+  const saveGoal = async () => {
+    const v = parseInt(goalDraft, 10);
+    if (isNaN(v) || v < 0) { toast.error("Meta inválida"); return; }
+    setSavingGoal(true);
+    try {
+      const { data } = await api.put("/settings/weekly-goal", { value: v });
+      setGoal(data.value);
+      toast.success(`Meta semanal definida: ${data.value} convertido(s)`);
+    } catch { toast.error("Erro ao salvar meta"); }
+    finally { setSavingGoal(false); }
+  };
+
+  const sendTestRanking = async () => {
+    setSending(true);
+    try {
+      const { data } = await api.post("/leads/send-test-ranking");
+      if (data.ok) toast.success("Mensagem enviada pro seu WhatsApp!");
+      else toast.warning(data.reason || "CallMeBot não configurado");
+    } catch { toast.error("Erro ao enviar"); }
+    finally { setSending(false); }
+  };
 
   const setStatus = async (id, status) => {
     try { await api.patch(`/leads/${id}`, { status }); toast.success("Status atualizado"); load(); }
@@ -56,6 +89,13 @@ export default function Leads() {
   const counts = STATUS.reduce((acc, s) => ({ ...acc, [s.v]: items.filter(l => l.status === s.v).length }), {});
   const chartData = (stats?.por_origem || []).map(o => ({ name: o.origem, total: o.total, convertido: o.convertido, taxa: o.taxa_conversao }));
 
+  // Weekly (last 7 days) conversions for goal tracking
+  const weekAgo = Date.now() - 7*24*3600*1000;
+  const weekLeads = items.filter(l => { try { return new Date(l.created_at).getTime() >= weekAgo; } catch { return false; } });
+  const weekConverted = weekLeads.filter(l => l.status === "convertido").length;
+  const goalHit = weekConverted >= goal;
+  const pct = goal > 0 ? Math.min(100, Math.round((weekConverted / goal) * 100)) : 100;
+
   return (
     <div className="space-y-6 max-w-7xl">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
@@ -64,9 +104,51 @@ export default function Leads() {
           <h1 className="text-3xl font-extrabold text-slate-900" style={{fontFamily:'Outfit'}}>Leads capturados</h1>
           <p className="text-slate-600 mt-1">Contatos vindos da landing, com origem e taxa de conversão por canal.</p>
         </div>
-        <Button data-testid="refresh-leads-btn" onClick={load} variant="outline">
-          <RefreshCw className="w-4 h-4 mr-2"/> Atualizar
-        </Button>
+        <div className="flex gap-2">
+          <Button data-testid="send-test-ranking-btn" onClick={sendTestRanking} disabled={sending} variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+            <Send className="w-4 h-4 mr-2"/> {sending ? "Enviando…" : "Enviar teste WhatsApp"}
+          </Button>
+          <Button data-testid="refresh-leads-btn" onClick={load} variant="outline">
+            <RefreshCw className="w-4 h-4 mr-2"/> Atualizar
+          </Button>
+        </div>
+      </div>
+
+      {/* Meta semanal */}
+      <div className={`rounded-2xl border p-6 ${goalHit ? "border-emerald-300 bg-emerald-50" : "border-amber-200 bg-amber-50/40"}`} data-testid="meta-semanal-card">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className={`w-14 h-14 rounded-2xl grid place-items-center text-2xl ${goalHit ? "bg-emerald-600" : "bg-amber-500"}`}>
+              <span>{goalHit ? "🎯" : "🚧"}</span>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-widest font-bold text-slate-600">Meta semanal · últimos 7 dias</div>
+              <div className="mt-1 text-3xl font-extrabold text-slate-900" style={{fontFamily:'Outfit'}}>
+                {weekConverted} <span className="text-slate-400 text-2xl">/ {goal} convertidos</span>
+              </div>
+              <div className="text-sm text-slate-600 mt-1">
+                {goalHit
+                  ? `Bateu a meta em +${weekConverted-goal}! 🚀 Continue nesse ritmo.`
+                  : `Faltam ${Math.max(0, goal - weekConverted)} conversões para bater a meta.`}
+              </div>
+              <div className="mt-3 h-2 w-full max-w-md bg-white rounded-full overflow-hidden border border-slate-200">
+                <div className={`h-full transition-all ${goalHit ? "bg-emerald-500" : "bg-amber-500"}`} style={{ width: `${pct}%` }}/>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-end gap-2">
+            <div>
+              <Label htmlFor="goal-input" className="text-xs">Definir meta</Label>
+              <Input data-testid="meta-input" id="goal-input" type="number" min={0} max={1000}
+                value={goalDraft} onChange={e=>setGoalDraft(e.target.value)}
+                className="mt-1 w-28"/>
+            </div>
+            <Button data-testid="save-meta-btn" onClick={saveGoal} disabled={savingGoal}
+              className="bg-emerald-600 hover:bg-emerald-700">
+              <Target className="w-4 h-4 mr-2"/> Salvar
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* KPI status cards */}

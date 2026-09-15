@@ -774,16 +774,26 @@ async def _run_sweep():
     logger.info(f"[cron] whatsapp-sweep done. sent={sent} scanned={len(docs)}")
 
 
+async def _get_weekly_goal() -> int:
+    s = await db.settings.find_one({"key": "weekly_goal"})
+    try:
+        return int(s.get("value", 5)) if s else 5
+    except Exception:
+        return 5
+
+
 async def _run_weekly_ranking():
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     from datetime import timedelta as _td
     now = now_utc()
     since = (now - _td(days=7)).isoformat()
     leads = await db.leads.find({"created_at": {"$gte": since}}).to_list(5000)
+    goal = await _get_weekly_goal()
     if not leads:
         text = (
             "📊 *Radar Sanitário — Ranking semanal*\n\n"
             "Nenhum lead capturado nos últimos 7 dias.\n"
+            f"Meta da semana: {goal} convertido(s) 🚧\n"
             "Que tal impulsionar seus canais essa semana? 🚀"
         )
         await _send_callmebot(text)
@@ -812,18 +822,25 @@ async def _run_weekly_ranking():
     total_conv = sum(d["convertido"] for d in by_origem.values())
     total_lead = len(leads)
     campeao = ranking[0][0] if ranking else "—"
+    goal_icon = "🎯" if total_conv >= goal else "🚧"
+    goal_line = f"*Meta:* {total_conv}/{goal} {goal_icon}"
+    if total_conv >= goal:
+        goal_line += f" — bateu a meta em +{total_conv-goal}!"
+    else:
+        goal_line += f" — faltam {goal-total_conv} para bater"
     text = (
         "📊 *Radar Sanitário — Ranking semanal*\n"
         f"Últimos 7 dias · {now.strftime('%d/%m/%Y')}\n\n"
         f"*Total de leads:* {total_lead}\n"
         f"*Convertidos:* {total_conv}\n"
+        f"{goal_line}\n"
         f"*Canal campeão:* {campeao}\n\n"
         "*Seus canais que mais venderam:*\n"
         + "\n".join(linhas) +
         "\n\nAbra o painel em /leads para ver detalhes 💚"
     )
     ok = await _send_callmebot(text)
-    logger.info(f"[cron] weekly-ranking sent={ok} leads={total_lead}")
+    logger.info(f"[cron] weekly-ranking sent={ok} leads={total_lead} goal={goal} hit={total_conv>=goal}")
 
 
 @api.post("/cron/whatsapp-sweep")
@@ -840,6 +857,35 @@ async def cron_weekly_ranking(request: Request, background: BackgroundTasks):
     await _check_cron_auth(request)
     background.add_task(_run_weekly_ranking)
     return {"ok": True, "queued": True}
+
+
+class WeeklyGoalInput(BaseModel):
+    value: int = Field(ge=0, le=1000)
+
+
+@api.get("/settings/weekly-goal")
+async def get_weekly_goal(user: dict = Depends(require_admin)):
+    goal = await _get_weekly_goal()
+    return {"value": goal}
+
+
+@api.put("/settings/weekly-goal")
+async def set_weekly_goal(body: WeeklyGoalInput, user: dict = Depends(require_admin)):
+    await db.settings.update_one(
+        {"key": "weekly_goal"},
+        {"$set": {"key": "weekly_goal", "value": body.value, "updated_at": now_utc().isoformat()}},
+        upsert=True,
+    )
+    return {"value": body.value}
+
+
+@api.post("/leads/send-test-ranking")
+async def send_test_ranking(user: dict = Depends(require_admin)):
+    """Trigger the weekly ranking immediately (admin manual test)."""
+    if not CALLMEBOT_ADMIN_PHONE or not CALLMEBOT_APIKEY:
+        return {"ok": False, "reason": "CallMeBot não configurado. Adicione CALLMEBOT_APIKEY no .env."}
+    await _run_weekly_ranking()
+    return {"ok": True}
 
 
 # --- Twilio incoming webhook (support Q&A) ---
