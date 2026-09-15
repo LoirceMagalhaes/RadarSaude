@@ -9,6 +9,7 @@ import Dashboard from "@/pages/Dashboard";
 import Estabelecimentos from "@/pages/Estabelecimentos";
 import Documentos from "@/pages/Documentos";
 import Agendamento from "@/pages/Agendamento";
+import Suporte from "@/pages/Suporte";
 import AppLayout from "@/components/AppLayout";
 
 function Protected({ children }) {
@@ -31,6 +32,7 @@ function App() {
             <Route path="/estabelecimentos" element={<Estabelecimentos />} />
             <Route path="/documentos" element={<Documentos />} />
             <Route path="/agendamento" element={<Agendamento />} />
+            <Route path="/suporte" element={<Suporte />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

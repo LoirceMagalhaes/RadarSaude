@@ -1,0 +1,9 @@
+crons:
+  - name: rs-wa-sweep-08
+    description: "Varre documentos e dispara alertas WhatsApp para vencidos, ≤3 dias e ≤30 dias todo dia às 08h (America/Sao_Paulo)"
+    cron: "0 8 * * *"
+    timezone: "America/Sao_Paulo"
+    endpoint: "{{BASE_URL}}/api/cron/whatsapp-sweep"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

@@ -11,7 +11,7 @@ import { toast } from "sonner";
 
 const TIPOS = ["Hospital","Clínica Médica","Clínica Odontológica","Clínica Veterinária","Centro de Estética","Laboratório de Análises Clínicas","Laboratório Veterinário"];
 const RISCOS = ["I","II","III"];
-const emptyForm = { nome_fantasia:"", razao_social:"", tipo:"Clínica Odontológica", cnpj:"", cidade:"", uf:"", responsavel_tecnico:"", telefone:"", email:"", grau_risco:"II", ativo:true };
+const emptyForm = { nome_fantasia:"", razao_social:"", tipo:"Clínica Odontológica", cnpj:"", cidade:"", uf:"", responsavel_tecnico:"", telefone:"", email:"", whatsapp:"", grau_risco:"II", ativo:true };
 
 export default function Estabelecimentos() {
   const { user } = useAuth();
@@ -77,6 +77,7 @@ export default function Estabelecimentos() {
                 <div><Label>Responsável técnico</Label><Input value={form.responsavel_tecnico} onChange={e=>setForm({...form,responsavel_tecnico:e.target.value})} /></div>
                 <div><Label>Telefone</Label><Input value={form.telefone} onChange={e=>setForm({...form,telefone:e.target.value})} /></div>
                 <div><Label>E-mail</Label><Input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} /></div>
+                <div><Label>WhatsApp (E.164, ex.: +5541999998888)</Label><Input data-testid="estab-whatsapp-input" placeholder="+5541999998888" value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:e.target.value})} /></div>
                 <div>
                   <Label>Grau de risco</Label>
                   <Select value={form.grau_risco} onValueChange={v=>setForm({...form,grau_risco:v})}>

@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { Radar, LayoutDashboard, Building2, FileCheck2, CalendarRange, LogOut, Menu } from "lucide-react";
+import { Radar, LayoutDashboard, Building2, FileCheck2, CalendarRange, LogOut, Menu, MessageCircle } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -9,6 +9,7 @@ const nav = [
   { to: "/estabelecimentos", label: "Estabelecimentos", icon: Building2, testid: "nav-estabelecimentos" },
   { to: "/documentos", label: "Documentos & Licenças", icon: FileCheck2, testid: "nav-documentos" },
   { to: "/agendamento", label: "Agendamento", icon: CalendarRange, testid: "nav-agendamento" },
+  { to: "/suporte", label: "Suporte", icon: MessageCircle, testid: "nav-suporte", adminOnly: true },
 ];
 
 export default function AppLayout() {
@@ -47,7 +48,7 @@ export default function AppLayout() {
             </div>
           </div>
           <nav className="p-3 space-y-1">
-            {nav.map((n) => (
+            {nav.filter(n => !n.adminOnly || user?.role === 'admin').map((n) => (
               <NavLink
                 key={n.to}
                 to={n.to}

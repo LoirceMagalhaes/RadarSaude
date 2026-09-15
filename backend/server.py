@@ -10,12 +10,24 @@ import logging
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Literal
 
+import json
+import secrets as _secrets
 import bcrypt
 import jwt
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, BackgroundTasks
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
+
+# Twilio
+try:
+    from twilio.rest import Client as TwilioClient
+    from twilio.request_validator import RequestValidator
+    from twilio.twiml.messaging_response import MessagingResponse
+    _twilio_available = True
+except Exception:
+    _twilio_available = False
 
 # --- Setup ---
 mongo_url = os.environ['MONGO_URL']
@@ -24,6 +36,23 @@ db = client[os.environ['DB_NAME']]
 
 JWT_ALGORITHM = "HS256"
 JWT_SECRET = os.environ["JWT_SECRET"]
+
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")
+TWILIO_REMINDER_CONTENT_SID = os.environ.get("TWILIO_REMINDER_CONTENT_SID", "")
+PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", "").rstrip("/")
+APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "America/Sao_Paulo")
+WEBHOOK_CRON_SECRET = os.environ.get("WEBHOOK_CRON_SECRET", "")
+
+_twilio_client = None
+def get_twilio():
+    global _twilio_client
+    if not _twilio_available or not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        return None
+    if _twilio_client is None:
+        _twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    return _twilio_client
 
 app = FastAPI(title="Radar Sanitário API")
 api = APIRouter(prefix="/api")
@@ -106,6 +135,7 @@ class EstabelecimentoInput(BaseModel):
     responsavel_tecnico: Optional[str] = ""
     telefone: Optional[str] = ""
     email: Optional[str] = ""
+    whatsapp: Optional[str] = ""  # E.164, e.g. +5541999999999
     grau_risco: Optional[str] = "II"  # I, II, III
     ativo: bool = True
 
@@ -136,6 +166,10 @@ async def on_start():
     await db.estabelecimentos.create_index("id", unique=True)
     await db.documentos.create_index("id", unique=True)
     await db.visitas.create_index("id", unique=True)
+    await db.reminder_sends.create_index(
+        [("document_id", 1), ("bucket", 1), ("local_date", 1)], unique=True
+    )
+    await db.support_messages.create_index([("thread_key", 1), ("created_at", 1)])
 
     admin_email = os.environ["ADMIN_EMAIL"].lower()
     admin_password = os.environ["ADMIN_PASSWORD"]
@@ -272,6 +306,105 @@ def _status_from_dias(dias: int) -> str:
     return "vigente"
 
 
+# --- Twilio WhatsApp helpers ---
+def _wa(number: str) -> Optional[str]:
+    if not number:
+        return None
+    n = number.strip().replace(" ", "").replace("-", "")
+    if not n.startswith("+"):
+        return None
+    return f"whatsapp:{n}"
+
+
+def _classify_bucket(validade_iso: str) -> Optional[str]:
+    dias = _dias_para_vencer(validade_iso)
+    if dias < 0:
+        return "vencido"
+    if dias <= 3:
+        return "3_dias"
+    if dias <= 30:
+        return "30_dias"
+    return None
+
+
+def _format_reminder_body(estab_nome: str, tipo: str, numero: str, validade: str, bucket: str) -> str:
+    label = {"vencido": "VENCIDO", "3_dias": "vence em até 3 dias", "30_dias": "vence em até 30 dias"}[bucket]
+    n = f" nº {numero}" if numero else ""
+    return (
+        f"🚨 *Radar Sanitário*\n\n"
+        f"Documento *{tipo}*{n} do estabelecimento *{estab_nome}* {label}.\n"
+        f"Validade: {validade}\n\n"
+        f"Acesse o painel para renovar. Responda AJUDA para suporte."
+    )
+
+
+async def _send_wa(to_e164: str, body: str, content_sid: Optional[str] = None,
+                   content_variables: Optional[dict] = None) -> Optional[str]:
+    tw = get_twilio()
+    if not tw or not TWILIO_WHATSAPP_FROM:
+        logger.warning("Twilio não configurado — mensagem não enviada")
+        return None
+    to = _wa(to_e164)
+    if not to:
+        logger.warning(f"Número inválido: {to_e164}")
+        return None
+    try:
+        kwargs = {"from_": TWILIO_WHATSAPP_FROM, "to": to}
+        if content_sid:
+            kwargs["content_sid"] = content_sid
+            if content_variables is not None:
+                kwargs["content_variables"] = json.dumps(content_variables)
+        else:
+            kwargs["body"] = body
+        msg = tw.messages.create(**kwargs)
+        return msg.sid
+    except Exception as e:
+        logger.error(f"Erro Twilio: {e}")
+        return None
+
+
+async def _notify_if_due(doc: dict) -> Optional[str]:
+    """Send WhatsApp reminder if document is expired/<=3d/<=30d. Idempotent per (doc, bucket, day)."""
+    bucket = _classify_bucket(doc.get("validade", ""))
+    if not bucket:
+        return None
+    estab = await db.estabelecimentos.find_one({"id": doc.get("estabelecimento_id")})
+    if not estab:
+        return None
+    to = (estab.get("whatsapp") or "").strip()
+    if not to:
+        return None
+    local_date = date.today().isoformat()
+    key = {"document_id": doc["id"], "bucket": bucket, "local_date": local_date}
+    try:
+        await db.reminder_sends.insert_one({**key, "status": "reserved", "created_at": now_utc().isoformat()})
+    except Exception:
+        return None  # already sent today for this bucket
+    body = _format_reminder_body(
+        estab.get("nome_fantasia", ""),
+        doc.get("tipo", ""),
+        doc.get("numero", ""),
+        doc.get("validade", ""),
+        bucket,
+    )
+    content_vars = None
+    if TWILIO_REMINDER_CONTENT_SID:
+        content_vars = {
+            "1": estab.get("nome_fantasia", ""),
+            "2": doc.get("tipo", ""),
+            "3": doc.get("validade", ""),
+        }
+    sid = await _send_wa(to, body, TWILIO_REMINDER_CONTENT_SID or None, content_vars)
+    await db.reminder_sends.update_one(
+        key,
+        {"$set": {"status": "sent" if sid else "failed",
+                  "twilio_sid": sid,
+                  "sent_at": now_utc().isoformat(),
+                  "to": to}}
+    )
+    return sid
+
+
 # --- Estabelecimentos ---
 @api.get("/estabelecimentos")
 async def list_estab(user: dict = Depends(get_current_user)):
@@ -327,7 +460,7 @@ async def list_docs(user: dict = Depends(get_current_user)):
 
 
 @api.post("/documentos")
-async def create_doc(body: DocumentoInput, user: dict = Depends(get_current_user)):
+async def create_doc(body: DocumentoInput, background: BackgroundTasks, user: dict = Depends(get_current_user)):
     if user["role"] != "admin" and user.get("estabelecimento_id") != body.estabelecimento_id:
         raise HTTPException(403, "Sem permissão")
     doc = body.model_dump()
@@ -335,11 +468,12 @@ async def create_doc(body: DocumentoInput, user: dict = Depends(get_current_user
     doc["created_at"] = now_utc().isoformat()
     await db.documentos.insert_one(doc)
     _clean(doc)
+    background.add_task(_notify_if_due, dict(doc))
     return doc
 
 
 @api.put("/documentos/{doc_id}")
-async def update_doc(doc_id: str, body: DocumentoInput, user: dict = Depends(get_current_user)):
+async def update_doc(doc_id: str, body: DocumentoInput, background: BackgroundTasks, user: dict = Depends(get_current_user)):
     existing = await db.documentos.find_one({"id": doc_id})
     if not existing:
         raise HTTPException(404, "Documento não encontrado")
@@ -347,7 +481,9 @@ async def update_doc(doc_id: str, body: DocumentoInput, user: dict = Depends(get
         raise HTTPException(403, "Sem permissão")
     await db.documentos.update_one({"id": doc_id}, {"$set": body.model_dump()})
     doc = await db.documentos.find_one({"id": doc_id})
-    return _clean(doc)
+    _clean(doc)
+    background.add_task(_notify_if_due, dict(doc))
+    return doc
 
 
 @api.post("/documentos/{doc_id}/renovar")
@@ -599,6 +735,176 @@ async def seed_demo(user: dict = Depends(require_admin)):
         })
 
     return {"ok": True, "estabelecimentos": len(estab_ids)}
+
+
+# --- Cron: daily 08h sweep (Emergent platform cron) ---
+async def _check_cron_auth(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(401, "Missing bearer")
+    provided = auth[7:]
+    if not _secrets.compare_digest(provided, WEBHOOK_CRON_SECRET or ""):
+        raise HTTPException(401, "Invalid cron secret")
+
+
+async def _run_sweep():
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    docs = await db.documentos.find({}).to_list(10000)
+    sent = 0
+    for d in docs:
+        d = dict(d); d.pop("_id", None)
+        sid = await _notify_if_due(d)
+        if sid:
+            sent += 1
+    logger.info(f"[cron] whatsapp-sweep done. sent={sent} scanned={len(docs)}")
+
+
+@api.post("/cron/whatsapp-sweep")
+async def cron_whatsapp_sweep(request: Request, background: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    await _check_cron_auth(request)
+    background.add_task(_run_sweep)
+    return {"ok": True, "queued": True}
+
+
+# --- Twilio incoming webhook (support Q&A) ---
+FAQ_ANSWERS = [
+    (("horario", "horário", "atendimento"), "🕒 Nosso suporte funciona de segunda a sexta, das 8h às 18h (horário de Brasília)."),
+    (("prazo", "vencimento", "vence"), "📅 Você pode ver todos os prazos no painel do Radar Sanitário em Documentos & Licenças. Renovações ficam ativas por 12 meses."),
+    (("pgrss",), "📄 O PGRSS (Plano de Gerenciamento de RSS) precisa de revisão anual. No painel, cadastre com a data da última revisão."),
+    (("mtr",), "🚛 O Manifesto de Transporte de Resíduos (MTR) deve ser emitido a cada coleta. Registre no painel para receber lembretes."),
+    (("alvara", "alvará", "vigilancia", "vigilância"), "🏥 O Alvará Sanitário costuma valer 12 meses. Cadastre a data no painel e receba alertas em 30/3 dias antes do vencimento."),
+    (("preco", "preço", "plano", "valor"), "💚 Temos 3 planos: Essencial R$149/mês, Pro Clínica R$349/mês e Hospitalar (sob consulta). Fale com nosso time!"),
+    (("suporte", "humano", "atendente"), "👋 Ok! Um consultor humano falará com você em breve neste mesmo canal."),
+    (("ajuda", "help", "menu", "opcoes", "opções"), "📚 Envie: HORÁRIO, PRAZO, PGRSS, MTR, ALVARÁ, PREÇO ou SUPORTE."),
+]
+
+
+def _faq_response(body: str) -> str:
+    t = (body or "").casefold().strip()
+    if not t:
+        return "Olá! 👋 Envie AJUDA para ver os assuntos disponíveis."
+    for keywords, resp in FAQ_ANSWERS:
+        if any(k in t for k in keywords):
+            return resp
+    return "Não encontrei uma resposta automática. Digite AJUDA para ver as opções ou SUPORTE para falar com nossa equipe."
+
+
+@api.post("/twilio/whatsapp/incoming")
+async def twilio_incoming(request: Request):
+    # Twilio sends application/x-www-form-urlencoded
+    form = await request.form()
+    params = {str(k): str(v) for k, v in form.items()}
+
+    # Optional signature validation (skipped if creds missing)
+    signature = request.headers.get("X-Twilio-Signature", "")
+    if TWILIO_AUTH_TOKEN and _twilio_available and PUBLIC_API_URL and signature:
+        try:
+            validator = RequestValidator(TWILIO_AUTH_TOKEN)
+            url = f"{PUBLIC_API_URL}/api/twilio/whatsapp/incoming"
+            if not validator.validate(url, params, signature):
+                logger.warning("Twilio signature inválida")
+                raise HTTPException(403, "invalid signature")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Erro validando assinatura Twilio: {e}")
+
+    from_num = params.get("From", "")
+    to_num = params.get("To", "")
+    body = params.get("Body", "")
+    sid = params.get("MessageSid", "")
+    thread_key = from_num  # thread per whatsapp sender
+
+    # persist inbound
+    await db.support_messages.insert_one({
+        "id": str(uuid.uuid4()),
+        "thread_key": thread_key,
+        "direction": "in",
+        "from": from_num,
+        "to": to_num,
+        "body": body,
+        "twilio_sid": sid,
+        "created_at": now_utc().isoformat(),
+    })
+
+    reply = _faq_response(body)
+    # persist outbound
+    await db.support_messages.insert_one({
+        "id": str(uuid.uuid4()),
+        "thread_key": thread_key,
+        "direction": "out",
+        "from": to_num,
+        "to": from_num,
+        "body": reply,
+        "twilio_sid": None,
+        "created_at": now_utc().isoformat(),
+        "auto": True,
+    })
+
+    # Respond with TwiML so Twilio replies inline (no second API call needed)
+    if _twilio_available:
+        twiml = MessagingResponse()
+        twiml.message(reply)
+        return PlainTextResponse(str(twiml), media_type="application/xml")
+    return PlainTextResponse("<Response></Response>", media_type="application/xml")
+
+
+# --- Support chat endpoints ---
+@api.get("/support/threads")
+async def list_threads(user: dict = Depends(require_admin)):
+    pipeline = [
+        {"$sort": {"created_at": -1}},
+        {"$group": {
+            "_id": "$thread_key",
+            "last_message": {"$first": "$body"},
+            "last_direction": {"$first": "$direction"},
+            "last_at": {"$first": "$created_at"},
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"last_at": -1}},
+        {"$limit": 200},
+    ]
+    threads = []
+    async for t in db.support_messages.aggregate(pipeline):
+        threads.append({
+            "thread_key": t["_id"],
+            "last_message": t.get("last_message", ""),
+            "last_direction": t.get("last_direction", ""),
+            "last_at": t.get("last_at"),
+            "count": t.get("count", 0),
+        })
+    return threads
+
+
+@api.get("/support/threads/{thread_key:path}")
+async def get_thread(thread_key: str, user: dict = Depends(require_admin)):
+    msgs = await db.support_messages.find({"thread_key": thread_key}).sort("created_at", 1).to_list(500)
+    return [_clean(m) for m in msgs]
+
+
+class ReplyInput(BaseModel):
+    thread_key: str
+    body: str
+
+
+@api.post("/support/reply")
+async def support_reply(body: ReplyInput, user: dict = Depends(require_admin)):
+    to = body.thread_key.replace("whatsapp:", "")
+    sid = await _send_wa(to, body.body)
+    await db.support_messages.insert_one({
+        "id": str(uuid.uuid4()),
+        "thread_key": body.thread_key,
+        "direction": "out",
+        "from": TWILIO_WHATSAPP_FROM,
+        "to": body.thread_key,
+        "body": body.body,
+        "twilio_sid": sid,
+        "created_at": now_utc().isoformat(),
+        "manual": True,
+        "sent": bool(sid),
+    })
+    return {"ok": True, "sent": bool(sid), "sid": sid}
 
 
 @api.get("/")
