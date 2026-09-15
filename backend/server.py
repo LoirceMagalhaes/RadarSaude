@@ -782,6 +782,21 @@ async def _get_weekly_goal() -> int:
         return 5
 
 
+async def _get_channel_goals() -> dict:
+    s = await db.settings.find_one({"key": "channel_goals"})
+    if not s or not isinstance(s.get("value"), dict):
+        return {}
+    out = {}
+    for k, v in s["value"].items():
+        try:
+            n = int(v)
+            if n >= 0:
+                out[str(k)] = n
+        except Exception:
+            pass
+    return out
+
+
 async def _run_weekly_ranking():
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     from datetime import timedelta as _td
@@ -812,12 +827,17 @@ async def _run_weekly_ranking():
             d["em_contato"] += 1
 
     ranking = sorted(by_origem.items(), key=lambda kv: (-kv[1]["convertido"], -kv[1]["total"]))
+    channel_goals = await _get_channel_goals()
     medals = ["🥇", "🥈", "🥉"]
     linhas = []
     for i, (origem, d) in enumerate(ranking[:5]):
         medal = medals[i] if i < 3 else f"{i+1}º"
         taxa = round((d["convertido"] / d["total"]) * 100, 1) if d["total"] else 0.0
-        linhas.append(f"{medal} *{origem}* — {d['total']} lead(s) · {d['convertido']} convertido(s) · {taxa}%")
+        cg = channel_goals.get(origem)
+        goal_tag = ""
+        if cg is not None and cg > 0:
+            goal_tag = f" · meta {d['convertido']}/{cg} " + ("🎯" if d["convertido"] >= cg else "🚧")
+        linhas.append(f"{medal} *{origem}* — {d['total']} lead(s) · {d['convertido']} convertido(s) · {taxa}%{goal_tag}")
 
     total_conv = sum(d["convertido"] for d in by_origem.values())
     total_lead = len(leads)
@@ -877,6 +897,33 @@ async def set_weekly_goal(body: WeeklyGoalInput, user: dict = Depends(require_ad
         upsert=True,
     )
     return {"value": body.value}
+
+
+class ChannelGoalsInput(BaseModel):
+    goals: dict
+
+
+@api.get("/settings/channel-goals")
+async def get_channel_goals(user: dict = Depends(require_admin)):
+    return {"goals": await _get_channel_goals()}
+
+
+@api.put("/settings/channel-goals")
+async def set_channel_goals(body: ChannelGoalsInput, user: dict = Depends(require_admin)):
+    clean = {}
+    for k, v in (body.goals or {}).items():
+        try:
+            n = int(v)
+            if n > 0 and str(k).strip():
+                clean[str(k).strip()] = n
+        except Exception:
+            pass
+    await db.settings.update_one(
+        {"key": "channel_goals"},
+        {"$set": {"key": "channel_goals", "value": clean, "updated_at": now_utc().isoformat()}},
+        upsert=True,
+    )
+    return {"goals": clean}
 
 
 @api.post("/leads/send-test-ranking")

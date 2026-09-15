@@ -30,17 +30,23 @@ export default function Leads() {
   const [goal, setGoal] = useState(5);
   const [goalDraft, setGoalDraft] = useState("5");
   const [savingGoal, setSavingGoal] = useState(false);
+  const [channelGoals, setChannelGoals] = useState({});
+  const [channelDrafts, setChannelDrafts] = useState({});
+  const [savingChannels, setSavingChannels] = useState(false);
   const [sending, setSending] = useState(false);
 
   const load = async () => {
     try {
-      const [l, s, g] = await Promise.all([
+      const [l, s, g, cg] = await Promise.all([
         api.get("/leads"),
         api.get("/leads/stats"),
         api.get("/settings/weekly-goal"),
+        api.get("/settings/channel-goals"),
       ]);
       setItems(l.data); setStats(s.data);
       setGoal(g.data.value); setGoalDraft(String(g.data.value));
+      setChannelGoals(cg.data.goals || {});
+      setChannelDrafts(Object.fromEntries(Object.entries(cg.data.goals || {}).map(([k,v])=>[k,String(v)])));
     } catch { toast.error("Erro ao carregar leads"); }
   };
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
@@ -55,6 +61,22 @@ export default function Leads() {
       toast.success(`Meta semanal definida: ${data.value} convertido(s)`);
     } catch { toast.error("Erro ao salvar meta"); }
     finally { setSavingGoal(false); }
+  };
+
+  const saveChannelGoals = async () => {
+    const goals = {};
+    Object.entries(channelDrafts).forEach(([k, v]) => {
+      const n = parseInt(v, 10);
+      if (!isNaN(n) && n > 0) goals[k] = n;
+    });
+    setSavingChannels(true);
+    try {
+      const { data } = await api.put("/settings/channel-goals", { goals });
+      setChannelGoals(data.goals);
+      setChannelDrafts(Object.fromEntries(Object.entries(data.goals).map(([k,v])=>[k,String(v)])));
+      toast.success("Metas por canal salvas");
+    } catch { toast.error("Erro ao salvar metas por canal"); }
+    finally { setSavingChannels(false); }
   };
 
   const sendTestRanking = async () => {
@@ -187,28 +209,54 @@ export default function Leads() {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <h2 className="text-lg font-bold text-slate-900" style={{fontFamily:'Outfit'}}>Taxa de conversão</h2>
-          <p className="text-sm text-slate-500">Canais que mais convertem</p>
-          <div className="mt-4 space-y-3" data-testid="taxa-conversao-list">
-            {(stats?.por_origem || []).slice(0, 8).map(o => (
-              <div key={o.origem} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: originColor(o.origem) }}/>
-                  <span className="font-medium text-slate-800">{o.origem}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-slate-400 text-xs">{o.convertido}/{o.total}</span>
-                  <span className={`font-bold ${o.taxa_conversao >= 20 ? "text-emerald-600" : o.taxa_conversao >= 10 ? "text-amber-600" : "text-slate-500"}`}>
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900" style={{fontFamily:'Outfit'}}>Taxa de conversão</h2>
+              <p className="text-sm text-slate-500">Meta e desempenho por canal</p>
+            </div>
+            <Button data-testid="save-channel-goals-btn" size="sm" onClick={saveChannelGoals} disabled={savingChannels}
+              className="bg-emerald-600 hover:bg-emerald-700">
+              <Target className="w-3.5 h-3.5 mr-1.5"/> Salvar metas
+            </Button>
+          </div>
+          <div className="mt-2 space-y-2.5" data-testid="taxa-conversao-list">
+            {(stats?.por_origem || []).slice(0, 8).map(o => {
+              const cg = channelGoals[o.origem] || 0;
+              const hit = cg > 0 && o.convertido >= cg;
+              return (
+                <div key={o.origem} className="flex items-center gap-2 text-sm">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: originColor(o.origem) }}/>
+                  <span className="font-medium text-slate-800 truncate flex-1">{o.origem}</span>
+                  <span className="text-slate-400 text-xs whitespace-nowrap">{o.convertido}/{o.total}</span>
+                  <Input
+                    data-testid={`channel-goal-input-${o.origem}`}
+                    type="number" min={0} max={100}
+                    value={channelDrafts[o.origem] ?? ""}
+                    onChange={e=>setChannelDrafts({...channelDrafts, [o.origem]: e.target.value})}
+                    placeholder="—"
+                    className="w-16 h-8 text-center text-sm"
+                  />
+                  {cg > 0 ? (
+                    <span className={`text-lg leading-none ${hit ? "" : "opacity-70"}`} title={`Meta ${o.convertido}/${cg}`}>
+                      {hit ? "🎯" : "🚧"}
+                    </span>
+                  ) : (
+                    <span className="text-slate-300 text-xs w-6 text-center">—</span>
+                  )}
+                  <span className={`font-bold w-14 text-right ${o.taxa_conversao >= 20 ? "text-emerald-600" : o.taxa_conversao >= 10 ? "text-amber-600" : "text-slate-500"}`}>
                     {o.taxa_conversao}%
                   </span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {(!stats || stats.por_origem.length === 0) && (
               <div className="text-sm text-slate-400 py-6 text-center">
                 <TrendingUp className="w-6 h-6 mx-auto mb-2 opacity-40"/>Nenhum lead capturado ainda.
               </div>
             )}
+            <p className="text-[11px] text-slate-400 pt-2 border-t border-slate-100">
+              Defina uma meta numérica por canal e o ranking semanal do WhatsApp mostrará 🎯 ou 🚧 em cada um.
+            </p>
           </div>
         </div>
       </div>
