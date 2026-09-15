@@ -774,11 +774,71 @@ async def _run_sweep():
     logger.info(f"[cron] whatsapp-sweep done. sent={sent} scanned={len(docs)}")
 
 
+async def _run_weekly_ranking():
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    from datetime import timedelta as _td
+    now = now_utc()
+    since = (now - _td(days=7)).isoformat()
+    leads = await db.leads.find({"created_at": {"$gte": since}}).to_list(5000)
+    if not leads:
+        text = (
+            "📊 *Radar Sanitário — Ranking semanal*\n\n"
+            "Nenhum lead capturado nos últimos 7 dias.\n"
+            "Que tal impulsionar seus canais essa semana? 🚀"
+        )
+        await _send_callmebot(text)
+        logger.info("[cron] weekly-ranking: no leads")
+        return
+
+    by_origem = {}
+    for l in leads:
+        o = (l.get("origem") or "Direto") or "Direto"
+        d = by_origem.setdefault(o, {"total": 0, "convertido": 0, "em_contato": 0})
+        d["total"] += 1
+        st = l.get("status", "novo")
+        if st == "convertido":
+            d["convertido"] += 1
+        elif st == "em_contato":
+            d["em_contato"] += 1
+
+    ranking = sorted(by_origem.items(), key=lambda kv: (-kv[1]["convertido"], -kv[1]["total"]))
+    medals = ["🥇", "🥈", "🥉"]
+    linhas = []
+    for i, (origem, d) in enumerate(ranking[:5]):
+        medal = medals[i] if i < 3 else f"{i+1}º"
+        taxa = round((d["convertido"] / d["total"]) * 100, 1) if d["total"] else 0.0
+        linhas.append(f"{medal} *{origem}* — {d['total']} lead(s) · {d['convertido']} convertido(s) · {taxa}%")
+
+    total_conv = sum(d["convertido"] for d in by_origem.values())
+    total_lead = len(leads)
+    campeao = ranking[0][0] if ranking else "—"
+    text = (
+        "📊 *Radar Sanitário — Ranking semanal*\n"
+        f"Últimos 7 dias · {now.strftime('%d/%m/%Y')}\n\n"
+        f"*Total de leads:* {total_lead}\n"
+        f"*Convertidos:* {total_conv}\n"
+        f"*Canal campeão:* {campeao}\n\n"
+        "*Seus canais que mais venderam:*\n"
+        + "\n".join(linhas) +
+        "\n\nAbra o painel em /leads para ver detalhes 💚"
+    )
+    ok = await _send_callmebot(text)
+    logger.info(f"[cron] weekly-ranking sent={ok} leads={total_lead}")
+
+
 @api.post("/cron/whatsapp-sweep")
 async def cron_whatsapp_sweep(request: Request, background: BackgroundTasks):
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     await _check_cron_auth(request)
     background.add_task(_run_sweep)
+    return {"ok": True, "queued": True}
+
+
+@api.post("/cron/weekly-ranking")
+async def cron_weekly_ranking(request: Request, background: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    await _check_cron_auth(request)
+    background.add_task(_run_weekly_ranking)
     return {"ok": True, "queued": True}
 
 
