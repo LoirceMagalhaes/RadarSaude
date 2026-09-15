@@ -32,21 +32,24 @@ export default function Leads() {
   const [savingGoal, setSavingGoal] = useState(false);
   const [channelGoals, setChannelGoals] = useState({});
   const [channelDrafts, setChannelDrafts] = useState({});
+  const [previousChannelGoals, setPreviousChannelGoals] = useState({});
   const [savingChannels, setSavingChannels] = useState(false);
   const [sending, setSending] = useState(false);
 
   const load = async () => {
     try {
-      const [l, s, g, cg] = await Promise.all([
+      const [l, s, g, cg, pg] = await Promise.all([
         api.get("/leads"),
         api.get("/leads/stats"),
         api.get("/settings/weekly-goal"),
         api.get("/settings/channel-goals"),
+        api.get("/settings/channel-goals/previous"),
       ]);
       setItems(l.data); setStats(s.data);
       setGoal(g.data.value); setGoalDraft(String(g.data.value));
       setChannelGoals(cg.data.goals || {});
       setChannelDrafts(Object.fromEntries(Object.entries(cg.data.goals || {}).map(([k,v])=>[k,String(v)])));
+      setPreviousChannelGoals(pg.data.goals || {});
     } catch { toast.error("Erro ao carregar leads"); }
   };
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
@@ -74,9 +77,26 @@ export default function Leads() {
       const { data } = await api.put("/settings/channel-goals", { goals });
       setChannelGoals(data.goals);
       setChannelDrafts(Object.fromEntries(Object.entries(data.goals).map(([k,v])=>[k,String(v)])));
+      // Refresh previous snapshot (the PUT just moved current into previous)
+      try {
+        const pg = await api.get("/settings/channel-goals/previous");
+        setPreviousChannelGoals(pg.data.goals || {});
+      } catch {}
       toast.success("Metas por canal salvas");
     } catch { toast.error("Erro ao salvar metas por canal"); }
     finally { setSavingChannels(false); }
+  };
+
+  const repeatPreviousGoals = () => {
+    if (!previousChannelGoals || Object.keys(previousChannelGoals).length === 0) {
+      toast.info("Ainda não há metas da semana anterior salvas.");
+      return;
+    }
+    // Merge previous into current drafts (keys not present in drafts get added)
+    const merged = { ...channelDrafts };
+    Object.entries(previousChannelGoals).forEach(([k, v]) => { merged[k] = String(v); });
+    setChannelDrafts(merged);
+    toast.success("Metas anteriores carregadas — clique em Salvar para confirmar.");
   };
 
   const sendTestRanking = async () => {
@@ -214,10 +234,17 @@ export default function Leads() {
               <h2 className="text-lg font-bold text-slate-900" style={{fontFamily:'Outfit'}}>Taxa de conversão</h2>
               <p className="text-sm text-slate-500">Meta e desempenho por canal</p>
             </div>
-            <Button data-testid="save-channel-goals-btn" size="sm" onClick={saveChannelGoals} disabled={savingChannels}
-              className="bg-emerald-600 hover:bg-emerald-700">
-              <Target className="w-3.5 h-3.5 mr-1.5"/> Salvar metas
-            </Button>
+            <div className="flex gap-1.5">
+              <Button data-testid="repeat-prev-goals-btn" size="sm" variant="outline" onClick={repeatPreviousGoals}
+                disabled={Object.keys(previousChannelGoals).length === 0}
+                title={Object.keys(previousChannelGoals).length === 0 ? "Sem metas da semana anterior" : "Preenche com as metas da semana passada"}>
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5"/> Repetir semana anterior
+              </Button>
+              <Button data-testid="save-channel-goals-btn" size="sm" onClick={saveChannelGoals} disabled={savingChannels}
+                className="bg-emerald-600 hover:bg-emerald-700">
+                <Target className="w-3.5 h-3.5 mr-1.5"/> Salvar
+              </Button>
+            </div>
           </div>
           <div className="mt-2 space-y-2.5" data-testid="taxa-conversao-list">
             {(stats?.por_origem || []).slice(0, 8).map(o => {

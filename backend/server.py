@@ -918,12 +918,35 @@ async def set_channel_goals(body: ChannelGoalsInput, user: dict = Depends(requir
                 clean[str(k).strip()] = n
         except Exception:
             pass
+    # Snapshot current values into "previous" before overwriting, so the admin can restore them
+    current = await db.settings.find_one({"key": "channel_goals"})
+    if current and isinstance(current.get("value"), dict) and current["value"]:
+        await db.settings.update_one(
+            {"key": "channel_goals_previous"},
+            {"$set": {"key": "channel_goals_previous", "value": current["value"], "updated_at": now_utc().isoformat()}},
+            upsert=True,
+        )
     await db.settings.update_one(
         {"key": "channel_goals"},
         {"$set": {"key": "channel_goals", "value": clean, "updated_at": now_utc().isoformat()}},
         upsert=True,
     )
     return {"goals": clean}
+
+
+@api.get("/settings/channel-goals/previous")
+async def get_channel_goals_previous(user: dict = Depends(require_admin)):
+    s = await db.settings.find_one({"key": "channel_goals_previous"})
+    goals = {}
+    if s and isinstance(s.get("value"), dict):
+        for k, v in s["value"].items():
+            try:
+                n = int(v)
+                if n > 0:
+                    goals[str(k)] = n
+            except Exception:
+                pass
+    return {"goals": goals, "updated_at": (s or {}).get("updated_at")}
 
 
 @api.post("/leads/send-test-ranking")
