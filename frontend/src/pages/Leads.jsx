@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, Phone, RefreshCw, Trash2, ExternalLink, MessageCircle, CheckCircle2, X } from "lucide-react";
+import { Users, Phone, RefreshCw, Trash2, MessageCircle, CheckCircle2, X, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from "recharts";
 
 const STATUS = [
   { v: "novo",         label: "Novo",         color: "bg-sky-100 text-sky-700 border-sky-200" },
@@ -12,13 +12,25 @@ const STATUS = [
   { v: "perdido",      label: "Perdido",      color: "bg-slate-100 text-slate-500 border-slate-200" },
 ];
 
+const ORIGEM_COLORS = {
+  "Google":"#4285f4", "Instagram":"#e1306c", "Facebook":"#1877f2",
+  "LinkedIn":"#0a66c2", "YouTube":"#ff0000", "TikTok":"#010101",
+  "Indicação":"#059669", "E-mail marketing":"#f59e0b", "Anúncio pago":"#7c3aed",
+  "Direto":"#64748b", "Outro":"#94a3b8"
+};
+const originColor = (o) => ORIGEM_COLORS[o] || "#64748b";
+
 export default function Leads() {
   const [items, setItems] = useState([]);
+  const [stats, setStats] = useState(null);
   const [filter, setFilter] = useState("todos");
+  const [origemFilter, setOrigemFilter] = useState("todas");
 
   const load = async () => {
-    try { const { data } = await api.get("/leads"); setItems(data); }
-    catch { toast.error("Erro ao carregar leads"); }
+    try {
+      const [l, s] = await Promise.all([api.get("/leads"), api.get("/leads/stats")]);
+      setItems(l.data); setStats(s.data);
+    } catch { toast.error("Erro ao carregar leads"); }
   };
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
 
@@ -32,12 +44,17 @@ export default function Leads() {
     catch { toast.error("Erro"); }
   };
 
-  const fmt = (iso) => {
-    try { return new Date(iso).toLocaleString("pt-BR"); } catch { return iso; }
-  };
+  const fmt = (iso) => { try { return new Date(iso).toLocaleString("pt-BR"); } catch { return iso; } };
 
-  const filtered = filter === "todos" ? items : items.filter(l => l.status === filter);
+  const origens = useMemo(() => Array.from(new Set(items.map(l => l.origem || "Direto"))), [items]);
+
+  const filtered = items.filter(l =>
+    (filter === "todos" || l.status === filter) &&
+    (origemFilter === "todas" || (l.origem || "Direto") === origemFilter)
+  );
+
   const counts = STATUS.reduce((acc, s) => ({ ...acc, [s.v]: items.filter(l => l.status === s.v).length }), {});
+  const chartData = (stats?.por_origem || []).map(o => ({ name: o.origem, total: o.total, convertido: o.convertido, taxa: o.taxa_conversao }));
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -45,27 +62,93 @@ export default function Leads() {
         <div>
           <div className="text-xs uppercase tracking-widest text-emerald-600 font-bold">Comercial</div>
           <h1 className="text-3xl font-extrabold text-slate-900" style={{fontFamily:'Outfit'}}>Leads capturados</h1>
-          <p className="text-slate-600 mt-1">Contatos vindos da landing com boas-vindas automáticas via WhatsApp.</p>
+          <p className="text-slate-600 mt-1">Contatos vindos da landing, com origem e taxa de conversão por canal.</p>
         </div>
         <Button data-testid="refresh-leads-btn" onClick={load} variant="outline">
           <RefreshCw className="w-4 h-4 mr-2"/> Atualizar
         </Button>
       </div>
 
+      {/* KPI status cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {STATUS.map(s => (
-          <button key={s.v} onClick={()=>setFilter(s.v)} className={`rounded-xl p-4 text-left border transition ${filter===s.v?"ring-2 ring-emerald-500 border-emerald-300":"border-slate-200 bg-white hover:border-emerald-300"}`}>
+          <button key={s.v} onClick={()=>setFilter(filter===s.v?"todos":s.v)} className={`rounded-xl p-4 text-left border transition ${filter===s.v?"ring-2 ring-emerald-500 border-emerald-300":"border-slate-200 bg-white hover:border-emerald-300"}`}>
             <div className="text-xs uppercase tracking-widest text-slate-500 font-bold">{s.label}</div>
             <div className="text-3xl font-extrabold text-slate-900 mt-1" style={{fontFamily:'Outfit'}}>{counts[s.v] || 0}</div>
           </button>
         ))}
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* Origem breakdown */}
+      <div className="grid lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900" style={{fontFamily:'Outfit'}}>Leads por canal de origem</h2>
+              <p className="text-sm text-slate-500">Onde seus clientes te acharam</p>
+            </div>
+            <span className="text-[10px] uppercase tracking-widest text-emerald-600 font-bold">total {stats?.total || 0}</span>
+          </div>
+          <div className="h-64" data-testid="chart-origem">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0"/>
+                <XAxis dataKey="name" stroke="#64748b" fontSize={12}/>
+                <YAxis stroke="#64748b" fontSize={12} allowDecimals={false}/>
+                <Tooltip contentStyle={{ background:"white", border:"1px solid #e2e8f0", borderRadius:12 }}/>
+                <Bar dataKey="total" name="Total" radius={[6,6,0,0]}>
+                  {chartData.map((d, i) => <Cell key={i} fill={originColor(d.name)}/>)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+          <h2 className="text-lg font-bold text-slate-900" style={{fontFamily:'Outfit'}}>Taxa de conversão</h2>
+          <p className="text-sm text-slate-500">Canais que mais convertem</p>
+          <div className="mt-4 space-y-3" data-testid="taxa-conversao-list">
+            {(stats?.por_origem || []).slice(0, 8).map(o => (
+              <div key={o.origem} className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: originColor(o.origem) }}/>
+                  <span className="font-medium text-slate-800">{o.origem}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-slate-400 text-xs">{o.convertido}/{o.total}</span>
+                  <span className={`font-bold ${o.taxa_conversao >= 20 ? "text-emerald-600" : o.taxa_conversao >= 10 ? "text-amber-600" : "text-slate-500"}`}>
+                    {o.taxa_conversao}%
+                  </span>
+                </div>
+              </div>
+            ))}
+            {(!stats || stats.por_origem.length === 0) && (
+              <div className="text-sm text-slate-400 py-6 text-center">
+                <TrendingUp className="w-6 h-6 mx-auto mb-2 opacity-40"/>Nenhum lead capturado ainda.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant={filter==="todos"?"default":"outline"} onClick={()=>setFilter("todos")}
           className={filter==="todos"?"bg-emerald-600 hover:bg-emerald-700":""}>
           Todos ({items.length})
         </Button>
+        <div className="h-6 w-px bg-slate-200 mx-1"/>
+        <Button size="sm" variant={origemFilter==="todas"?"default":"outline"} onClick={()=>setOrigemFilter("todas")}
+          className={origemFilter==="todas"?"bg-slate-800 hover:bg-slate-900":""}>
+          Todas as origens
+        </Button>
+        {origens.map(o => (
+          <Button key={o} size="sm" variant={origemFilter===o?"default":"outline"} onClick={()=>setOrigemFilter(o)}
+            data-testid={`filter-origem-${o}`}
+            style={origemFilter===o ? { background: originColor(o), color: 'white' } : { borderColor: originColor(o), color: originColor(o) }}>
+            {o}
+          </Button>
+        ))}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
@@ -77,6 +160,7 @@ export default function Leads() {
                 <th className="text-left p-4">Lead</th>
                 <th className="text-left p-4">WhatsApp</th>
                 <th className="text-left p-4">Estabelecimento</th>
+                <th className="text-left p-4">Origem</th>
                 <th className="text-left p-4">Envio</th>
                 <th className="text-left p-4">Status</th>
                 <th className="p-4"></th>
@@ -84,14 +168,15 @@ export default function Leads() {
             </thead>
             <tbody data-testid="leads-table-body">
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="p-10 text-center text-slate-400">
+                <tr><td colSpan={8} className="p-10 text-center text-slate-400">
                   <Users className="w-8 h-8 mx-auto mb-2 opacity-40"/>
-                  Nenhum lead {filter!=="todos" ? "com esse status" : "capturado ainda"}. Compartilhe o link da landing!
+                  Nenhum lead {filter!=="todos" || origemFilter!=="todas" ? "com esses filtros" : "capturado ainda"}.
                 </td></tr>
               )}
               {filtered.map(l => {
                 const st = STATUS.find(s => s.v === l.status) || STATUS[0];
                 const waMe = `https://wa.me/${l.whatsapp.replace(/\D/g,"")}`;
+                const origem = l.origem || "Direto";
                 return (
                   <tr key={l.id} className="border-b border-slate-50 hover:bg-emerald-50/30">
                     <td className="p-4 text-slate-500 text-xs">{fmt(l.created_at)}</td>
@@ -108,6 +193,17 @@ export default function Leads() {
                     <td className="p-4 text-slate-700">
                       {l.estabelecimento || "—"}
                       {l.tipo && <div className="text-xs text-slate-500">{l.tipo}</div>}
+                    </td>
+                    <td className="p-4">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border" style={{ borderColor: originColor(origem), color: originColor(origem), background: originColor(origem)+"15" }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: originColor(origem) }}/>
+                        {origem}
+                      </span>
+                      {(l.utm_source || l.utm_campaign) && (
+                        <div className="text-[10px] text-slate-400 mt-1 font-mono">
+                          {l.utm_source && `src:${l.utm_source}`}{l.utm_campaign && ` · ${l.utm_campaign}`}
+                        </div>
+                      )}
                     </td>
                     <td className="p-4 text-xs">
                       <span className={`inline-block px-2 py-0.5 rounded font-bold ${

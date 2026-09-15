@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,11 +24,41 @@ const planos = [
 ];
 
 const TIPOS_ESTAB = ["Hospital","Clínica Médica","Clínica Odontológica","Clínica Veterinária","Centro de Estética","Laboratório de Análises Clínicas","Laboratório Veterinário","Outro"];
+const ORIGENS = ["Google","Instagram","Facebook","LinkedIn","YouTube","TikTok","Indicação","E-mail marketing","Anúncio pago","Outro"];
 
 function LeadForm() {
-  const [form, setForm] = useState({ name:"", whatsapp:"", email:"", estabelecimento:"", tipo:"", mensagem:"" });
+  const [form, setForm] = useState({ name:"", whatsapp:"", email:"", estabelecimento:"", tipo:"", mensagem:"", origem:"" });
+  const [utm, setUtm] = useState({ utm_source:"", utm_medium:"", utm_campaign:"", referrer:"" });
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(null);
+
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const detected = {
+        utm_source: p.get("utm_source") || "",
+        utm_medium: p.get("utm_medium") || "",
+        utm_campaign: p.get("utm_campaign") || "",
+        referrer: document.referrer || "",
+      };
+      setUtm(detected);
+      // Pre-fill origem based on utm_source or referrer
+      const src = (detected.utm_source || "").toLowerCase();
+      const ref = (detected.referrer || "").toLowerCase();
+      const guess = (
+        src.includes("google") || ref.includes("google") ? "Google" :
+        src.includes("insta")  || ref.includes("instagram") ? "Instagram" :
+        src.includes("face")   || ref.includes("facebook") ? "Facebook" :
+        src.includes("linked") || ref.includes("linkedin") ? "LinkedIn" :
+        src.includes("youtube")|| ref.includes("youtube") ? "YouTube" :
+        src.includes("tiktok") || ref.includes("tiktok") ? "TikTok" :
+        src.includes("ads") || src.includes("cpc") || detected.utm_medium === "cpc" ? "Anúncio pago" :
+        detected.utm_medium === "email" ? "E-mail marketing" :
+        ""
+      );
+      if (guess) setForm(f => ({ ...f, origem: guess }));
+    } catch {}
+  }, []);
 
   const up = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -39,10 +69,10 @@ function LeadForm() {
     }
     setLoading(true);
     try {
-      const { data } = await api.post("/leads", { ...form, origem: "landing" });
+      const { data } = await api.post("/leads", { ...form, ...utm, origem: form.origem || "Direto" });
       setSuccess(data);
       toast.success("Recebemos seu contato!");
-      setForm({ name:"", whatsapp:"", email:"", estabelecimento:"", tipo:"", mensagem:"" });
+      setForm({ name:"", whatsapp:"", email:"", estabelecimento:"", tipo:"", mensagem:"", origem: form.origem });
     } catch (err) {
       toast.error(err.response?.data?.detail || "Erro ao enviar");
     } finally { setLoading(false); }
@@ -110,9 +140,18 @@ function LeadForm() {
             </Select>
           </div>
         </div>
-        <div>
-          <Label htmlFor="l-msg">Mensagem (opcional)</Label>
-          <Input data-testid="lead-msg-input" id="l-msg" value={form.mensagem} onChange={up("mensagem")} placeholder="Como podemos te ajudar?" className="mt-1.5" />
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <Label>Como conheceu?</Label>
+            <Select value={form.origem} onValueChange={v=>setForm({...form,origem:v})}>
+              <SelectTrigger data-testid="lead-origem-select" className="mt-1.5"><SelectValue placeholder="Selecione (opcional)"/></SelectTrigger>
+              <SelectContent>{ORIGENS.map(o=><SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="l-msg">Mensagem (opcional)</Label>
+            <Input data-testid="lead-msg-input" id="l-msg" value={form.mensagem} onChange={up("mensagem")} placeholder="Como podemos te ajudar?" className="mt-1.5" />
+          </div>
         </div>
         <Button data-testid="lead-submit-btn" type="submit" disabled={loading} className="w-full h-11 bg-emerald-600 hover:bg-emerald-700">
           {loading ? <Loader2 className="w-4 h-4 animate-spin"/> : "Quero receber contato no WhatsApp"}

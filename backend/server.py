@@ -910,7 +910,11 @@ class LeadInput(BaseModel):
     tipo: Optional[str] = ""
     email: Optional[str] = ""
     mensagem: Optional[str] = ""
-    origem: Optional[str] = "landing"
+    origem: Optional[str] = "Direto"
+    utm_source: Optional[str] = ""
+    utm_medium: Optional[str] = ""
+    utm_campaign: Optional[str] = ""
+    referrer: Optional[str] = ""
 
 
 @api.post("/support/reply")
@@ -1014,6 +1018,8 @@ async def _process_lead_async(lead_id: str):
         f"WhatsApp: {lead.get('whatsapp','')}\n"
         f"Estabelecimento: {lead.get('estabelecimento','') or '—'}\n"
         f"Tipo: {lead.get('tipo','') or '—'}\n"
+        f"Origem: {lead.get('origem','') or '—'}"
+        + (f" ({lead.get('utm_source')}/{lead.get('utm_medium')})" if lead.get('utm_source') else "") + "\n"
         f"Mensagem: {lead.get('mensagem','') or '—'}"
     )
     admin_ok = await _send_callmebot(admin_text)
@@ -1068,6 +1074,30 @@ async def create_lead(body: LeadInput, background: BackgroundTasks):
 async def list_leads(user: dict = Depends(require_admin)):
     items = await db.leads.find({}).sort("created_at", -1).to_list(1000)
     return [_clean(x) for x in items]
+
+
+@api.get("/leads/stats")
+async def leads_stats(user: dict = Depends(require_admin)):
+    """Breakdown by origem + utm_source and conversion rate per origem."""
+    items = await db.leads.find({}).to_list(2000)
+    by_origem = {}
+    by_utm = {}
+    for l in items:
+        o = (l.get("origem") or "Direto") or "Direto"
+        s = l.get("status", "novo")
+        b = by_origem.setdefault(o, {"total": 0, "novo": 0, "em_contato": 0, "convertido": 0, "perdido": 0})
+        b["total"] += 1
+        if s in b:
+            b[s] += 1
+        u = (l.get("utm_source") or "").strip()
+        if u:
+            by_utm[u] = by_utm.get(u, 0) + 1
+    result = []
+    for origem, d in by_origem.items():
+        taxa = round((d["convertido"] / d["total"]) * 100, 1) if d["total"] else 0.0
+        result.append({"origem": origem, **d, "taxa_conversao": taxa})
+    result.sort(key=lambda x: x["total"], reverse=True)
+    return {"por_origem": result, "por_utm": [{"utm": k, "total": v} for k, v in sorted(by_utm.items(), key=lambda x: -x[1])], "total": len(items)}
 
 
 @api.patch("/leads/{lead_id}")
