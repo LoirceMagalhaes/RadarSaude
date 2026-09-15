@@ -1,0 +1,143 @@
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Users, Phone, RefreshCw, Trash2, ExternalLink, MessageCircle, CheckCircle2, X } from "lucide-react";
+import { toast } from "sonner";
+
+const STATUS = [
+  { v: "novo",         label: "Novo",         color: "bg-sky-100 text-sky-700 border-sky-200" },
+  { v: "em_contato",   label: "Em contato",   color: "bg-amber-100 text-amber-700 border-amber-200" },
+  { v: "convertido",   label: "Convertido",   color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  { v: "perdido",      label: "Perdido",      color: "bg-slate-100 text-slate-500 border-slate-200" },
+];
+
+export default function Leads() {
+  const [items, setItems] = useState([]);
+  const [filter, setFilter] = useState("todos");
+
+  const load = async () => {
+    try { const { data } = await api.get("/leads"); setItems(data); }
+    catch { toast.error("Erro ao carregar leads"); }
+  };
+  useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
+
+  const setStatus = async (id, status) => {
+    try { await api.patch(`/leads/${id}`, { status }); toast.success("Status atualizado"); load(); }
+    catch { toast.error("Erro"); }
+  };
+  const remove = async (id) => {
+    if (!window.confirm("Excluir lead?")) return;
+    try { await api.delete(`/leads/${id}`); toast.success("Excluído"); load(); }
+    catch { toast.error("Erro"); }
+  };
+
+  const fmt = (iso) => {
+    try { return new Date(iso).toLocaleString("pt-BR"); } catch { return iso; }
+  };
+
+  const filtered = filter === "todos" ? items : items.filter(l => l.status === filter);
+  const counts = STATUS.reduce((acc, s) => ({ ...acc, [s.v]: items.filter(l => l.status === s.v).length }), {});
+
+  return (
+    <div className="space-y-6 max-w-7xl">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+        <div>
+          <div className="text-xs uppercase tracking-widest text-emerald-600 font-bold">Comercial</div>
+          <h1 className="text-3xl font-extrabold text-slate-900" style={{fontFamily:'Outfit'}}>Leads capturados</h1>
+          <p className="text-slate-600 mt-1">Contatos vindos da landing com boas-vindas automáticas via WhatsApp.</p>
+        </div>
+        <Button data-testid="refresh-leads-btn" onClick={load} variant="outline">
+          <RefreshCw className="w-4 h-4 mr-2"/> Atualizar
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {STATUS.map(s => (
+          <button key={s.v} onClick={()=>setFilter(s.v)} className={`rounded-xl p-4 text-left border transition ${filter===s.v?"ring-2 ring-emerald-500 border-emerald-300":"border-slate-200 bg-white hover:border-emerald-300"}`}>
+            <div className="text-xs uppercase tracking-widest text-slate-500 font-bold">{s.label}</div>
+            <div className="text-3xl font-extrabold text-slate-900 mt-1" style={{fontFamily:'Outfit'}}>{counts[s.v] || 0}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant={filter==="todos"?"default":"outline"} onClick={()=>setFilter("todos")}
+          className={filter==="todos"?"bg-emerald-600 hover:bg-emerald-700":""}>
+          Todos ({items.length})
+        </Button>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500 uppercase text-xs">
+              <tr>
+                <th className="text-left p-4">Recebido</th>
+                <th className="text-left p-4">Lead</th>
+                <th className="text-left p-4">WhatsApp</th>
+                <th className="text-left p-4">Estabelecimento</th>
+                <th className="text-left p-4">Envio</th>
+                <th className="text-left p-4">Status</th>
+                <th className="p-4"></th>
+              </tr>
+            </thead>
+            <tbody data-testid="leads-table-body">
+              {filtered.length === 0 && (
+                <tr><td colSpan={7} className="p-10 text-center text-slate-400">
+                  <Users className="w-8 h-8 mx-auto mb-2 opacity-40"/>
+                  Nenhum lead {filter!=="todos" ? "com esse status" : "capturado ainda"}. Compartilhe o link da landing!
+                </td></tr>
+              )}
+              {filtered.map(l => {
+                const st = STATUS.find(s => s.v === l.status) || STATUS[0];
+                const waMe = `https://wa.me/${l.whatsapp.replace(/\D/g,"")}`;
+                return (
+                  <tr key={l.id} className="border-b border-slate-50 hover:bg-emerald-50/30">
+                    <td className="p-4 text-slate-500 text-xs">{fmt(l.created_at)}</td>
+                    <td className="p-4">
+                      <div className="font-semibold text-slate-900">{l.name}</div>
+                      {l.email && <div className="text-xs text-slate-500">{l.email}</div>}
+                      {l.mensagem && <div className="text-xs text-slate-400 italic mt-1">"{l.mensagem}"</div>}
+                    </td>
+                    <td className="p-4">
+                      <a href={waMe} target="_blank" rel="noopener noreferrer" className="text-emerald-700 hover:underline font-mono text-xs inline-flex items-center gap-1">
+                        <Phone className="w-3 h-3"/>{l.whatsapp}
+                      </a>
+                    </td>
+                    <td className="p-4 text-slate-700">
+                      {l.estabelecimento || "—"}
+                      {l.tipo && <div className="text-xs text-slate-500">{l.tipo}</div>}
+                    </td>
+                    <td className="p-4 text-xs">
+                      <span className={`inline-block px-2 py-0.5 rounded font-bold ${
+                        l.whatsapp_welcome_status === "sent" ? "bg-emerald-100 text-emerald-700" :
+                        l.whatsapp_welcome_status === "skipped" ? "bg-amber-100 text-amber-700" :
+                        "bg-slate-100 text-slate-500"
+                      }`}>
+                        {l.whatsapp_welcome_status === "sent" ? "✓ WhatsApp enviado" :
+                         l.whatsapp_welcome_status === "skipped" ? "aguardando config" : "na fila"}
+                      </span>
+                      {l.admin_notified && <div className="mt-1 text-emerald-700">✓ admin avisado</div>}
+                    </td>
+                    <td className="p-4">
+                      <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold border ${st.color}`}>{st.label}</span>
+                    </td>
+                    <td className="p-4 text-right">
+                      <div className="flex gap-1 justify-end">
+                        <Button data-testid={`lead-contato-${l.id}`} variant="ghost" size="sm" onClick={()=>setStatus(l.id,"em_contato")} title="Marcar em contato" className="text-amber-600"><MessageCircle className="w-4 h-4"/></Button>
+                        <Button data-testid={`lead-convertido-${l.id}`} variant="ghost" size="sm" onClick={()=>setStatus(l.id,"convertido")} title="Convertido" className="text-emerald-600"><CheckCircle2 className="w-4 h-4"/></Button>
+                        <Button data-testid={`lead-perdido-${l.id}`} variant="ghost" size="sm" onClick={()=>setStatus(l.id,"perdido")} title="Perdido"><X className="w-4 h-4"/></Button>
+                        <Button data-testid={`lead-delete-${l.id}`} variant="ghost" size="sm" onClick={()=>remove(l.id)} className="text-rose-600"><Trash2 className="w-4 h-4"/></Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

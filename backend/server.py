@@ -45,6 +45,21 @@ PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", "").rstrip("/")
 APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "America/Sao_Paulo")
 WEBHOOK_CRON_SECRET = os.environ.get("WEBHOOK_CRON_SECRET", "")
 
+WHATSAPP_CLOUD_TOKEN = os.environ.get("WHATSAPP_CLOUD_TOKEN", "")
+WHATSAPP_CLOUD_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_CLOUD_PHONE_NUMBER_ID", "")
+WHATSAPP_CLOUD_API_VERSION = os.environ.get("WHATSAPP_CLOUD_API_VERSION", "v20.0")
+WHATSAPP_WELCOME_TEMPLATE = os.environ.get("WHATSAPP_WELCOME_TEMPLATE", "hello_world")
+WHATSAPP_TEMPLATE_LANG = os.environ.get("WHATSAPP_TEMPLATE_LANG", "en_US")
+CALLMEBOT_ADMIN_PHONE = os.environ.get("CALLMEBOT_ADMIN_PHONE", "")
+CALLMEBOT_APIKEY = os.environ.get("CALLMEBOT_APIKEY", "")
+ADMIN_WHATSAPP_NUMBER = os.environ.get("ADMIN_WHATSAPP_NUMBER", "")
+
+try:
+    import httpx  # noqa
+    _http_available = True
+except Exception:
+    _http_available = False
+
 _twilio_client = None
 def get_twilio():
     global _twilio_client
@@ -888,6 +903,16 @@ class ReplyInput(BaseModel):
     body: str
 
 
+class LeadInput(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    whatsapp: str = Field(min_length=8, max_length=25)
+    estabelecimento: Optional[str] = ""
+    tipo: Optional[str] = ""
+    email: Optional[str] = ""
+    mensagem: Optional[str] = ""
+    origem: Optional[str] = "landing"
+
+
 @api.post("/support/reply")
 async def support_reply(body: ReplyInput, user: dict = Depends(require_admin)):
     to = body.thread_key.replace("whatsapp:", "")
@@ -905,6 +930,161 @@ async def support_reply(body: ReplyInput, user: dict = Depends(require_admin)):
         "sent": bool(sid),
     })
     return {"ok": True, "sent": bool(sid), "sid": sid}
+
+
+# --- Lead Converter (WhatsApp Cloud API + CallMeBot + wa.me) ---
+def _normalize_phone(raw: str) -> Optional[str]:
+    if not raw:
+        return None
+    digits = "".join(c for c in raw if c.isdigit() or c == "+")
+    if not digits:
+        return None
+    if not digits.startswith("+"):
+        # Assume BR default if user didn't provide country code
+        digits = "+55" + digits.lstrip("0")
+    if len(digits) < 10:
+        return None
+    return digits
+
+
+async def _send_whatsapp_cloud_template(to_e164: str, variables: List[str]) -> Optional[str]:
+    """Send welcome via WhatsApp Cloud API (Meta). Returns message id or None."""
+    if not _http_available or not WHATSAPP_CLOUD_TOKEN or not WHATSAPP_CLOUD_PHONE_NUMBER_ID:
+        return None
+    import httpx
+    url = f"https://graph.facebook.com/{WHATSAPP_CLOUD_API_VERSION}/{WHATSAPP_CLOUD_PHONE_NUMBER_ID}/messages"
+    template = {"name": WHATSAPP_WELCOME_TEMPLATE, "language": {"code": WHATSAPP_TEMPLATE_LANG}}
+    if variables:
+        template["components"] = [{
+            "type": "body",
+            "parameters": [{"type": "text", "text": v} for v in variables],
+        }]
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_e164.lstrip("+"),
+        "type": "template",
+        "template": template,
+    }
+    headers = {"Authorization": f"Bearer {WHATSAPP_CLOUD_TOKEN}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(url, headers=headers, json=payload)
+        if r.is_error:
+            logger.warning(f"WhatsApp Cloud API erro {r.status_code}: {r.text[:300]}")
+            return None
+        data = r.json()
+        return (data.get("messages") or [{}])[0].get("id")
+    except Exception as e:
+        logger.error(f"WhatsApp Cloud API exceção: {e}")
+        return None
+
+
+async def _send_callmebot(text: str) -> bool:
+    """Notify admin via CallMeBot (free)."""
+    if not _http_available or not CALLMEBOT_ADMIN_PHONE or not CALLMEBOT_APIKEY:
+        return False
+    import httpx
+    phone = CALLMEBOT_ADMIN_PHONE.lstrip("+")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://api.callmebot.com/whatsapp.php",
+                params={"phone": phone, "text": text, "apikey": CALLMEBOT_APIKEY},
+            )
+        return r.status_code == 200
+    except Exception as e:
+        logger.error(f"CallMeBot exceção: {e}")
+        return False
+
+
+async def _process_lead_async(lead_id: str):
+    lead = await db.leads.find_one({"id": lead_id})
+    if not lead:
+        return
+    # 1) Welcome via WhatsApp Cloud API
+    wa_id = await _send_whatsapp_cloud_template(
+        lead["whatsapp"],
+        variables=[lead.get("name", "")],
+    )
+    # 2) Notify admin via CallMeBot
+    admin_text = (
+        f"🚨 Novo lead Radar Sanitário!\n"
+        f"Nome: {lead.get('name','')}\n"
+        f"WhatsApp: {lead.get('whatsapp','')}\n"
+        f"Estabelecimento: {lead.get('estabelecimento','') or '—'}\n"
+        f"Tipo: {lead.get('tipo','') or '—'}\n"
+        f"Mensagem: {lead.get('mensagem','') or '—'}"
+    )
+    admin_ok = await _send_callmebot(admin_text)
+    await db.leads.update_one(
+        {"id": lead_id},
+        {"$set": {
+            "whatsapp_welcome_id": wa_id,
+            "whatsapp_welcome_status": "sent" if wa_id else "skipped",
+            "admin_notified": admin_ok,
+            "processed_at": now_utc().isoformat(),
+        }}
+    )
+
+
+@api.post("/leads")
+async def create_lead(body: LeadInput, background: BackgroundTasks):
+    phone = _normalize_phone(body.whatsapp)
+    if not phone:
+        raise HTTPException(400, "Número de WhatsApp inválido. Use o formato +55DDNNNNNNNNN.")
+    lead_id = str(uuid.uuid4())
+    doc = body.model_dump()
+    doc.update({
+        "id": lead_id,
+        "whatsapp": phone,
+        "status": "novo",
+        "created_at": now_utc().isoformat(),
+        "whatsapp_welcome_status": "queued",
+        "admin_notified": False,
+    })
+    await db.leads.insert_one(doc)
+
+    # wa.me link para o próprio visitante iniciar conversa com o admin
+    admin_wa = (ADMIN_WHATSAPP_NUMBER or CALLMEBOT_ADMIN_PHONE or "").lstrip("+")
+    wa_me_message = (
+        f"Olá! Sou {body.name} e quero saber mais sobre o Radar Sanitário. "
+        f"Meu estabelecimento: {body.estabelecimento or '—'}."
+    )
+    from urllib.parse import quote
+    wa_me_link = f"https://wa.me/{admin_wa}?text={quote(wa_me_message)}" if admin_wa else None
+
+    background.add_task(_process_lead_async, lead_id)
+
+    return {
+        "ok": True,
+        "id": lead_id,
+        "wa_me_link": wa_me_link,
+        "message": "Recebemos seu contato! Você receberá uma mensagem no WhatsApp em instantes.",
+    }
+
+
+@api.get("/leads")
+async def list_leads(user: dict = Depends(require_admin)):
+    items = await db.leads.find({}).sort("created_at", -1).to_list(1000)
+    return [_clean(x) for x in items]
+
+
+@api.patch("/leads/{lead_id}")
+async def update_lead_status(lead_id: str, body: dict, user: dict = Depends(require_admin)):
+    allowed = {"novo", "em_contato", "convertido", "perdido"}
+    status = body.get("status")
+    if status not in allowed:
+        raise HTTPException(400, "status inválido")
+    await db.leads.update_one({"id": lead_id}, {"$set": {"status": status, "updated_at": now_utc().isoformat()}})
+    doc = await db.leads.find_one({"id": lead_id})
+    return _clean(doc)
+
+
+@api.delete("/leads/{lead_id}")
+async def delete_lead(lead_id: str, user: dict = Depends(require_admin)):
+    await db.leads.delete_one({"id": lead_id})
+    return {"ok": True}
 
 
 @api.get("/")

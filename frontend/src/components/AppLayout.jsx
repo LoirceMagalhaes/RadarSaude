@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { Radar, LayoutDashboard, Building2, FileCheck2, CalendarRange, LogOut, Menu, MessageCircle } from "lucide-react";
+import { Radar, LayoutDashboard, Building2, FileCheck2, CalendarRange, LogOut, Menu, MessageCircle, Users } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -10,6 +10,7 @@ const nav = [
   { to: "/documentos", label: "Documentos & Licenças", icon: FileCheck2, testid: "nav-documentos" },
   { to: "/agendamento", label: "Agendamento", icon: CalendarRange, testid: "nav-agendamento" },
   { to: "/suporte", label: "Suporte", icon: MessageCircle, testid: "nav-suporte", adminOnly: true },
+  { to: "/leads", label: "Leads", icon: Users, testid: "nav-leads", adminOnly: true },
 ];
 
 export default function AppLayout() {

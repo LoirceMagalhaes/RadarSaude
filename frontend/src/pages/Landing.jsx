@@ -1,6 +1,12 @@
 import { Link } from "react-router-dom";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Radar, ShieldCheck, BellRing, CalendarRange, FileCheck2, TrendingUp, Building2, ArrowRight, CheckCircle2, Zap } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+import { Radar, ShieldCheck, BellRing, CalendarRange, FileCheck2, TrendingUp, Building2, ArrowRight, CheckCircle2, Zap, Loader2, MessageCircle } from "lucide-react";
 
 const features = [
   { icon: BellRing, title: "Alertas em tempo real", desc: "Notificações imediatas por WhatsApp, e-mail e in-app assim que um documento se aproxima do vencimento." },
@@ -16,6 +22,106 @@ const planos = [
   { nome: "Pro Clínica", preco: "R$ 349", per: "/mês", pra: "Clínicas e labs", features: ["Até 5 estabelecimentos", "Documentos ilimitados", "WhatsApp + E-mail", "Dashboard 12 meses", "Agenda de coletas"], destaque: true },
   { nome: "Hospitalar", preco: "Sob consulta", per: "", pra: "Redes e hospitais", features: ["Estabelecimentos ilimitados", "API + integrações", "SLA dedicado", "Consultoria de PGRSS", "Onboarding assistido"], destaque: false },
 ];
+
+const TIPOS_ESTAB = ["Hospital","Clínica Médica","Clínica Odontológica","Clínica Veterinária","Centro de Estética","Laboratório de Análises Clínicas","Laboratório Veterinário","Outro"];
+
+function LeadForm() {
+  const [form, setForm] = useState({ name:"", whatsapp:"", email:"", estabelecimento:"", tipo:"", mensagem:"" });
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(null);
+
+  const up = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim() || !form.whatsapp.trim()) {
+      toast.error("Preencha nome e WhatsApp"); return;
+    }
+    setLoading(true);
+    try {
+      const { data } = await api.post("/leads", { ...form, origem: "landing" });
+      setSuccess(data);
+      toast.success("Recebemos seu contato!");
+      setForm({ name:"", whatsapp:"", email:"", estabelecimento:"", tipo:"", mensagem:"" });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Erro ao enviar");
+    } finally { setLoading(false); }
+  };
+
+  if (success) {
+    return (
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 lg:p-10">
+        <div className="w-14 h-14 rounded-full bg-emerald-600 grid place-items-center mb-5">
+          <CheckCircle2 className="w-7 h-7 text-white"/>
+        </div>
+        <h3 className="text-2xl font-extrabold text-slate-900" style={{fontFamily:'Outfit'}}>Recebemos seu contato!</h3>
+        <p className="mt-3 text-slate-700">Você receberá uma mensagem no WhatsApp em instantes com os próximos passos. Enquanto isso, se preferir, fale conosco agora:</p>
+        <div className="mt-6 flex flex-col sm:flex-row gap-3">
+          {success.wa_me_link && (
+            <a href={success.wa_me_link} target="_blank" rel="noopener noreferrer">
+              <Button data-testid="wa-me-cta" className="bg-emerald-600 hover:bg-emerald-700">
+                <MessageCircle className="w-4 h-4 mr-2"/> Abrir WhatsApp
+              </Button>
+            </a>
+          )}
+          <Button data-testid="lead-new-btn" variant="outline" onClick={()=>setSuccess(null)}>Enviar outro</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} data-testid="lead-form" className="rounded-2xl border border-slate-200 bg-white p-6 lg:p-8 shadow-sm">
+      <div className="flex items-center gap-2 mb-5">
+        <div className="w-9 h-9 rounded-lg bg-emerald-600 text-white grid place-items-center">
+          <MessageCircle className="w-4 h-4" />
+        </div>
+        <div>
+          <div className="font-bold text-slate-900" style={{fontFamily:'Outfit'}}>Receba boas-vindas no WhatsApp</div>
+          <div className="text-xs text-slate-500">Sem spam. Só o que interessa.</div>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <Label htmlFor="l-name">Seu nome *</Label>
+          <Input data-testid="lead-name-input" id="l-name" required value={form.name} onChange={up("name")} placeholder="Ex.: Dra. Ana Souza" className="mt-1.5" />
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="l-wa">WhatsApp *</Label>
+            <Input data-testid="lead-whatsapp-input" id="l-wa" required value={form.whatsapp} onChange={up("whatsapp")} placeholder="+55 41 99999-8888" className="mt-1.5" />
+          </div>
+          <div>
+            <Label htmlFor="l-email">E-mail</Label>
+            <Input data-testid="lead-email-input" id="l-email" type="email" value={form.email} onChange={up("email")} placeholder="voce@clinica.com" className="mt-1.5" />
+          </div>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="l-estab">Nome do estabelecimento</Label>
+            <Input data-testid="lead-estab-input" id="l-estab" value={form.estabelecimento} onChange={up("estabelecimento")} placeholder="Ex.: Clínica Sorriso" className="mt-1.5" />
+          </div>
+          <div>
+            <Label>Tipo</Label>
+            <Select value={form.tipo} onValueChange={v=>setForm({...form,tipo:v})}>
+              <SelectTrigger data-testid="lead-tipo-select" className="mt-1.5"><SelectValue placeholder="Selecione"/></SelectTrigger>
+              <SelectContent>{TIPOS_ESTAB.map(t=><SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="l-msg">Mensagem (opcional)</Label>
+          <Input data-testid="lead-msg-input" id="l-msg" value={form.mensagem} onChange={up("mensagem")} placeholder="Como podemos te ajudar?" className="mt-1.5" />
+        </div>
+        <Button data-testid="lead-submit-btn" type="submit" disabled={loading} className="w-full h-11 bg-emerald-600 hover:bg-emerald-700">
+          {loading ? <Loader2 className="w-4 h-4 animate-spin"/> : "Quero receber contato no WhatsApp"}
+        </Button>
+        <p className="text-[11px] text-slate-500 text-center">Ao enviar você concorda em receber uma mensagem no WhatsApp da nossa equipe.</p>
+      </div>
+    </form>
+  );
+}
 
 export default function Landing() {
   return (
@@ -205,6 +311,36 @@ export default function Landing() {
                 </Link>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Lead capture form */}
+      <section id="contato" className="py-20 lg:py-24 bg-white">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-emerald-600 font-bold mb-3">Fale conosco</div>
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900" style={{fontFamily:'Outfit'}}>
+                Quer ver o Radar Sanitário rodando na sua clínica?
+              </h2>
+              <p className="mt-4 text-lg text-slate-600">
+                Preencha seus dados e você receberá uma mensagem no WhatsApp em poucos segundos com o próximo passo. Sem cartão de crédito, sem enrolação.
+              </p>
+              <div className="mt-8 space-y-3">
+                {[
+                  "Demo personalizada em 15 minutos",
+                  "Onboarding gratuito nos primeiros 14 dias",
+                  "Suporte via WhatsApp de segunda a sexta",
+                ].map((item) => (
+                  <div key={item} className="flex items-start gap-2 text-slate-700">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" /> {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <LeadForm />
           </div>
         </div>
       </section>
